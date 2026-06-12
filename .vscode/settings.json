@@ -1,0 +1,8 @@
+{
+    // This is here to adhere to the GBAJam 2026 rules.
+    // And lead us not into temptation; but deliver us from evil. Amen.
+    "github.copilot.enable": {
+        "*": false
+    },
+    "chat.disableAIFeatures": true
+}
