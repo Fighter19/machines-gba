@@ -224,13 +224,13 @@ int main(int argc, char *argv[])
     // TODO: Do rendering
     for (int y = 0; y < 160; y++)
     {
+      // Start of linebuffer preparation
+      // nPitch is in bytes, calculate start of row, then cast to FBPixel
+      FBPixel *pRow = (FBPixel *)&((char *)pPixels)[y * nPitch];
+
       // Mock a color
       for (int x = 0; x < rect.w; x++)
       {
-        // Start of linebuffer
-
-        // nPitch is in bytes, calculate start of row, then cast to FBPixel
-        FBPixel *pRow = (FBPixel *)&((char *)pPixels)[y * nPitch];
         // Map 160 to 31, roughly by divding by 4
         FBPixel brightness = y >> 2;
         if (brightness >= 31)
@@ -239,10 +239,13 @@ int main(int argc, char *argv[])
         }
         
         linebuffer[x] = brightness * 0x421;
-
-        // End of linebuffer
-        pRow[x] = linebuffer[x];
       }
+      // End of linebuffer
+
+      // Copy the linebuffer to the currently locked row.
+      // Only copy as much as fits into the framebuffer row.
+      // (Our linebuffer is a bit larger. 256 pixels vs 240 pixels)
+      memcpy(pRow, linebuffer, nPitch);
     }
 
 
