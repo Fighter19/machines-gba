@@ -59,7 +59,13 @@ static inline FBPixel palIndexToRGBA(bool bIsObj, uint8_t palNumber, uint8_t idx
   }
 
   const ColorBGR &color = pRow[palNumber].colors[idx];
-  return SDL_MapRGB(s_pPixelFormat, color.r, color.g, color.b);
+
+  // This would be necessary if the pixel format was different
+  //return SDL_MapRGB(s_pPixelFormat, color.r, color.g, color.b);
+
+  // But it isn't!
+  // Plus however I used it, it didn't yield the expected result
+  return *(Uint16*)&color;
 }
 
 struct TileInfo
@@ -99,12 +105,14 @@ static void renderRowOfTileWithPalette(void *pVram, Palette *pSourcePalette, Til
   }
 
   TileData8x8 &vramTile = pVram8x8[pTileInfo->idx];
+  // The byte offset where the current line of the tile starts
+  size_t rowOffset = y * 4;
   // Draw all 8 pixels into pDst
   // (2 pixels drawn per step because of nibble extraction)
   for (size_t i = 0; i < 4; i++)
   {
-    size_t pixel1 = vramTile.data[0] & 0xf;
-    size_t pixel2 = (vramTile.data[0] >> 4) & 0xf;
+    size_t pixel1 = vramTile.data[i + rowOffset] & 0xf;
+    size_t pixel2 = (vramTile.data[i + rowOffset] >> 4) & 0xf;
     FBPixel pixel1RGBA = palIndexToRGBA(bIsObj, pTileInfo->palNumber, pixel1);
     FBPixel pixel2RGBA = palIndexToRGBA(bIsObj, pTileInfo->palNumber, pixel2);
 
@@ -225,8 +233,6 @@ int main(int argc, char *argv[])
     for (int y = 0; y < 160; y++)
     {
       // Start of linebuffer preparation
-      // nPitch is in bytes, calculate start of row, then cast to FBPixel
-      FBPixel *pRow = (FBPixel *)&((char *)pPixels)[y * nPitch];
 
       // Mock a color
       for (int x = 0; x < rect.w; x++)
@@ -240,9 +246,19 @@ int main(int argc, char *argv[])
         
         linebuffer[x] = brightness * 0x421;
       }
+
+      // Mock render of one tile repeatedly across the very left
+      TileInfo tileInfo;
+      tileInfo.idx = 0;
+      tileInfo.palNumber = 15;
+      renderRowOfTileWithPalette(pVram, pPaletteRam, &tileInfo, true, y % 8, &linebuffer[0]);
+
       // End of linebuffer
 
       // Copy the linebuffer to the currently locked row.
+      // nPitch is in bytes, calculate start of row, then cast to FBPixel
+      FBPixel *pRow = (FBPixel *)&((char *)pPixels)[y * nPitch];
+
       // Only copy as much as fits into the framebuffer row.
       // (Our linebuffer is a bit larger. 256 pixels vs 240 pixels)
       memcpy(pRow, linebuffer, nPitch);
