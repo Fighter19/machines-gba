@@ -41,8 +41,10 @@ struct Palette
 static Palette *pPaletteRam = NULL;
 static SDL_PixelFormat *s_pPixelFormat = NULL;
 
+typedef Uint16 FBPixel;
+
 // Function to convert color to current preferred SDL format
-static inline Uint32 palIndexToRGBA(bool bIsObj, uint8_t palNumber, uint8_t idx)
+static inline FBPixel palIndexToRGBA(bool bIsObj, uint8_t palNumber, uint8_t idx)
 {
   if (idx == 0)
   {
@@ -87,7 +89,7 @@ struct TileData8x8
  * @param y Which part of the tile to render
  * @param pDst The color output for the tile
  */
-static void renderRowOfTileWithPalette(void *pVram, Palette *pSourcePalette, TileInfo *pTileInfo, bool bIsObj, size_t y, Uint32 *pDst)
+static void renderRowOfTileWithPalette(void *pVram, Palette *pSourcePalette, TileInfo *pTileInfo, bool bIsObj, size_t y, FBPixel *pDst)
 {
   TileData8x8 *pVram8x8 = (TileData8x8 *)pVram;
   if (bIsObj)
@@ -103,11 +105,12 @@ static void renderRowOfTileWithPalette(void *pVram, Palette *pSourcePalette, Til
   {
     size_t pixel1 = vramTile.data[0] & 0xf;
     size_t pixel2 = (vramTile.data[0] >> 4) & 0xf;
-    Uint32 pixel1RGBA = palIndexToRGBA(bIsObj, pTileInfo->palNumber, pixel1);
-    Uint32 pixel2RGBA = palIndexToRGBA(bIsObj, pTileInfo->palNumber, pixel2);
+    FBPixel pixel1RGBA = palIndexToRGBA(bIsObj, pTileInfo->palNumber, pixel1);
+    FBPixel pixel2RGBA = palIndexToRGBA(bIsObj, pTileInfo->palNumber, pixel2);
 
     pDst[0] = pixel1RGBA;
     pDst[1] = pixel2RGBA;
+    // Progress by two pixels
     pDst += 2;
   }
 }
@@ -115,7 +118,7 @@ static void renderRowOfTileWithPalette(void *pVram, Palette *pSourcePalette, Til
 // 256 is 240 aligned to 32,
 // in order to allow rendering of a tile horizontally (up to 16 width),
 // without having to use range checks
-// static Uint32 framebuffer[160][256];
+static FBPixel linebuffer[256];
 
 int main(int argc, char *argv[])
 {
@@ -162,13 +165,8 @@ int main(int argc, char *argv[])
     return -1;
   }
 
-  Uint32 pixelFormat = SDL_GetWindowPixelFormat(pMainWindow);
-  s_pPixelFormat = SDL_AllocFormat(pixelFormat);
-  if (!s_pPixelFormat)
-  {
-    fprintf(stderr, "Failed to obtain pixel format\n");
-    return -1;
-  }
+  // Not relevant
+  // Uint32 pixelFormat = SDL_GetWindowPixelFormat(pMainWindow);
 
   SDL_Renderer *pRenderer = SDL_CreateRenderer(pMainWindow, -1, 0);
   if (!pRenderer)
@@ -178,25 +176,14 @@ int main(int argc, char *argv[])
   }
 
   // 16 = bit count. 256 = amount of pixels. Required is by count -> 2byte/pixel * 256 pixels
-  /*
-  SDL_Surface *pSurface = SDL_CreateRGBSurfaceFrom(&framebuffer, 240, 160, 16, 256*(16/8), 0x1F, 0x1F << 5, 0x1F << 10, 0x0);
-  if (!pSurface)
-  {
-    fprintf(stderr, "Error occured while setting up SDL surface: %s\n", SDL_GetError());
-    return -1;
-  }
-
-  // Texture of the framebuffer
-  SDL_Texture *pTexture = SDL_CreateTextureFromSurface(pRenderer, pSurface);
-  if (!pTexture)
-  {
-    fprintf(stderr, "Error occured while setting up SDL texture: %s\n", SDL_GetError());
-    return -1;
-  }
-  */
-
-
   Uint32 pixelFormatGBA = SDL_MasksToPixelFormatEnum(16, 0x1F, 0x1F << 5, 0x1F << 10, 0x0);
+  s_pPixelFormat = SDL_AllocFormat(pixelFormatGBA);
+  if (!s_pPixelFormat)
+  {
+    fprintf(stderr, "Failed to obtain pixel format\n");
+    return -1;
+  }
+
   SDL_Texture *pTexture = SDL_CreateTexture(pRenderer, pixelFormatGBA, SDL_TEXTUREACCESS_STREAMING, 240, 160);
   if (!pTexture)
   {
@@ -231,16 +218,21 @@ int main(int argc, char *argv[])
       // Mock a color
       for (int x = 0; x < rect.w; x++)
       {
-        // nPitch is in bytes, calculate start of row, then cast to Uint16
-        Uint16 *pRow = (Uint16 *)&((char *)pPixels)[y * nPitch];
+        // Start of linebuffer
+
+        // nPitch is in bytes, calculate start of row, then cast to FBPixel
+        FBPixel *pRow = (FBPixel *)&((char *)pPixels)[y * nPitch];
         // Map 160 to 31, roughly by divding by 4
-        Uint16 brightness = y >> 2;
+        FBPixel brightness = y >> 2;
         if (brightness >= 31)
         {
           brightness = 31;
         }
         
-        pRow[x] = brightness * 0x421;
+        linebuffer[x] = brightness * 0x421;
+
+        // End of linebuffer
+        pRow[x] = linebuffer[x];
       }
     }
 
