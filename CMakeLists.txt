@@ -1,6 +1,13 @@
 cmake_minimum_required(VERSION 3.28)
 project(machines-gba)
 
+set(USE_ASAN OFF CACHE BOOL "Using Address Sanitizer")
+
+if (USE_ASAN)
+add_compile_options(-fsanitize=address)
+add_link_options(-fsanitize=address)
+endif(USE_ASAN)
+
 # Required for the visual test
 set(USE_SDL ON CACHE BOOL "Use SDL for rendering (headless otherwise)")
 

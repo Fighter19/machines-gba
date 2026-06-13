@@ -198,6 +198,15 @@ int main(int argc, char *argv[])
 #ifdef USE_SDL
     SDL_SetRenderDrawColor(pRenderer, 255, 255, 255, 255);
     SDL_RenderClear(pRenderer);
+
+    SDL_Event event;
+    while (SDL_PollEvent(&event))
+    {
+      if (event.type == SDL_KEYDOWN)
+      {
+        bQuit = true;
+      }
+    }
 #endif
 
     // Currently lock everything
