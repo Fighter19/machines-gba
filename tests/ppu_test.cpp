@@ -17,10 +17,10 @@ static void print_msg(char *msg)
 
 struct __attribute__((packed)) ColorBGR 
 {
-  uint16_t x: 1;
-  uint16_t b: 5;
-  uint16_t g: 5;
   uint16_t r: 5;
+  uint16_t g: 5;
+  uint16_t b: 5;
+  uint16_t x: 1;
 };
 
 static_assert(sizeof(ColorBGR) == sizeof(Uint16));
