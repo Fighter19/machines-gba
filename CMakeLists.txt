@@ -1,6 +1,9 @@
 cmake_minimum_required(VERSION 3.28)
 project(machines-gba)
 
+# Required for the visual test
+set(USE_SDL ON CACHE BOOL "Use SDL for rendering (headless otherwise)")
+
 set(SG_SOURCES
     sg_fixed_number_internal.cpp
     sg_fixed_vector2_internal.cpp
@@ -21,10 +24,13 @@ target_include_directories(sg_physics_2d PUBLIC ${SG_PHYSICS_DIR})
 add_executable(sg_physics_test tests/sg_physics_basic_test.cpp)
 target_link_libraries(sg_physics_test sg_physics_2d)
 
-# Required for the visual test
-set(USE_SDL ON CACHE BOOL "Use SDL for rendering (headless otherwise)")
+add_executable(ppu_test tests/ppu_test.cpp)
+
 if (USE_SDL)
     find_package(SDL2)
     target_link_libraries(sg_physics_test SDL2)
     target_compile_definitions(sg_physics_test PRIVATE USE_SDL)
+
+    target_link_libraries(ppu_test SDL2)
+    target_compile_definitions(ppu_test PRIVATE USE_SDL)
 endif(USE_SDL)
