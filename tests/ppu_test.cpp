@@ -42,7 +42,7 @@ static Palette *pPaletteRam = NULL;
 static SDL_PixelFormat *s_pPixelFormat = NULL;
 
 // Function to convert color to current preferred SDL format
-static inline Uint32 palIndexToRGBA(bool is_obj, uint8_t bank, uint8_t idx)
+static inline Uint32 palIndexToRGBA(bool bIsObj, uint8_t palNumber, uint8_t idx)
 {
   if (idx == 0)
   {
@@ -51,14 +51,71 @@ static inline Uint32 palIndexToRGBA(bool is_obj, uint8_t bank, uint8_t idx)
   }
 
   const PaletteRow *pRow = pPaletteRam->rows_obj;
-  if (!is_obj)
+  if (!bIsObj)
   {
     pRow = pPaletteRam->rows_bg;
   }
 
-  const ColorBGR &color = pRow[bank].colors[idx];
+  const ColorBGR &color = pRow[palNumber].colors[idx];
   return SDL_MapRGB(s_pPixelFormat, color.r, color.g, color.b);
 }
+
+struct TileInfo
+{
+  size_t idx;
+  size_t palNumber;
+};
+
+struct TileData8x8
+{
+  // Only placeholder to have correct size
+  uint8_t data[0x20];
+};
+
+/**
+ * Render part of a tile to a destination buffer
+ * 
+ * Runs during line buffer emulation. y is the line of the tile to be presented,
+ * needs to be calculated prior to calling.
+ * This function doesn't do range checking on X, so the buffer needs to be a tiny bit larger
+ * (stride). This is done to avoid having to include a branch, which could impact performance.
+ * And to keep the algorithm simple
+ * @param pVram The base address to sample the palette indices for the tile from
+ * @param pSourcePalette (Complete) Palette to reference palette index from
+ * @param pTileInfo Which tile to render with which palette
+ * @param bIsObj If VRAM is supposed to be read from object page
+ * @param y Which part of the tile to render
+ * @param pDst The color output for the tile
+ */
+static void renderRowOfTileWithPalette(void *pVram, Palette *pSourcePalette, TileInfo *pTileInfo, bool bIsObj, size_t y, Uint32 *pDst)
+{
+  TileData8x8 *pVram8x8 = (TileData8x8 *)pVram;
+  if (bIsObj)
+  {
+    // Jump forward to Obj page (Which is 0x10000 from base)
+    pVram8x8 = (TileData8x8 *)(((char *)pVram) + 0x10000);
+  }
+
+  TileData8x8 &vramTile = pVram8x8[pTileInfo->idx];
+  // Draw all 8 pixels into pDst
+  // (2 pixels drawn per step because of nibble extraction)
+  for (size_t i = 0; i < 4; i++)
+  {
+    size_t pixel1 = vramTile.data[0] & 0xf;
+    size_t pixel2 = (vramTile.data[0] >> 4) & 0xf;
+    Uint32 pixel1RGBA = palIndexToRGBA(bIsObj, pTileInfo->palNumber, pixel1);
+    Uint32 pixel2RGBA = palIndexToRGBA(bIsObj, pTileInfo->palNumber, pixel2);
+
+    pDst[0] = pixel1RGBA;
+    pDst[1] = pixel2RGBA;
+    pDst += 2;
+  }
+}
+
+// 256 is 240 aligned to 32,
+// in order to allow rendering of a tile horizontally (up to 16 width),
+// without having to use range checks
+// static Uint32 framebuffer[160][256];
 
 int main(int argc, char *argv[])
 {
@@ -119,6 +176,33 @@ int main(int argc, char *argv[])
     fprintf(stderr, "Error occured while setting up renderer: %s\n", SDL_GetError());
     return -1;
   }
+
+  // 16 = bit count. 256 = amount of pixels. Required is by count -> 2byte/pixel * 256 pixels
+  /*
+  SDL_Surface *pSurface = SDL_CreateRGBSurfaceFrom(&framebuffer, 240, 160, 16, 256*(16/8), 0x1F, 0x1F << 5, 0x1F << 10, 0x0);
+  if (!pSurface)
+  {
+    fprintf(stderr, "Error occured while setting up SDL surface: %s\n", SDL_GetError());
+    return -1;
+  }
+
+  // Texture of the framebuffer
+  SDL_Texture *pTexture = SDL_CreateTextureFromSurface(pRenderer, pSurface);
+  if (!pTexture)
+  {
+    fprintf(stderr, "Error occured while setting up SDL texture: %s\n", SDL_GetError());
+    return -1;
+  }
+  */
+
+
+  Uint32 pixelFormatGBA = SDL_MasksToPixelFormatEnum(16, 0x1F, 0x1F << 5, 0x1F << 10, 0x0);
+  SDL_Texture *pTexture = SDL_CreateTexture(pRenderer, pixelFormatGBA, SDL_TEXTUREACCESS_STREAMING, 240, 160);
+  if (!pTexture)
+  {
+    fprintf(stderr, "Error occured while setting up SDL texture: %s\n", SDL_GetError());
+    return -1;
+  }
 #endif
 
   bool bQuit = false;
@@ -129,6 +213,44 @@ int main(int argc, char *argv[])
     SDL_RenderClear(pRenderer);
 #endif
 
+    // Currently lock everything
+    SDL_Rect rect;
+    rect.x = 0;
+    rect.y = 0;
+    rect.w = 240;
+    rect.h = 160;
+
+    // The locked row of pixels that can be rendered
+    void *pPixels = NULL;
+    int nPitch = 0;
+    SDL_LockTexture(pTexture, &rect, &pPixels, &nPitch);
+
+    // TODO: Do rendering
+    for (int y = 0; y < 160; y++)
+    {
+      // Mock a color
+      for (int x = 0; x < rect.w; x++)
+      {
+        // nPitch is in bytes, calculate start of row, then cast to Uint16
+        Uint16 *pRow = (Uint16 *)&((char *)pPixels)[y * nPitch];
+        // Map 160 to 31, roughly by divding by 4
+        Uint16 brightness = y >> 2;
+        if (brightness >= 31)
+        {
+          brightness = 31;
+        }
+        
+        pRow[x] = brightness * 0x421;
+      }
+    }
+
+
+    // Upload the texture
+    SDL_UnlockTexture(pTexture);
+
+    // Render the uploaded texture
+    SDL_RenderCopy(pRenderer, pTexture, NULL, NULL);
+
 #ifdef USE_SDL
     SDL_RenderPresent(pRenderer);
     // Prevent rendering and logic to cap it to 60 FPS
@@ -137,6 +259,7 @@ int main(int argc, char *argv[])
   }
 
 #ifdef USE_SDL
+  // SDL_FreeSurface(pSurface);
   SDL_DestroyRenderer(pRenderer);
   SDL_DestroyWindow(pMainWindow);
   SDL_Quit();
