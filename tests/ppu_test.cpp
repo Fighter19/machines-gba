@@ -38,7 +38,90 @@ struct Palette
   PaletteRow rows_obj[16];
 };
 
+typedef enum
+{
+  OBJ_MODE_NORMAL,
+  OBJ_MODE_TRANSPARENT,
+  OBJ_MODE_WINDOW,
+  OBJ_MODE_PROHIBTED
+} ObjMode;
+
+typedef enum
+{
+  COLOR_AND_PAL_16_16,
+  COLOR_AND_PAL_256_1
+} ColorsAndPalConfig;
+
+typedef enum
+{
+  OBJ_SHAPE_SQUARE,
+  OBJ_SHAPE_HORIZONTAL,
+  OBJ_SHAPE_VERTICAL,
+  OBJ_SHAPE_PROHIBITED
+} ObjShape;
+
+struct __attribute__((packed)) ObjAttr0
+{
+  uint8_t y;
+  bool rot_scale_on : 1;
+
+  // This is both, double size (if rot/scale on)
+  // and obj disable (if not).
+  // Couldn't figure out how to make the union not
+  // increase the size by 2 bytes
+  bool double_size_on_obj_disable : 1;
+
+  ObjMode obj_mode : 2;
+  bool mosaic_on : 1;
+  ColorsAndPalConfig : 1;
+  ObjShape obj_shape : 2;
+};
+
+static_assert(sizeof(ObjAttr0) == 2);
+
+struct __attribute__((packed)) ObjAttr1
+{
+  uint8_t x;
+  uint8_t rot_scale_param : 4;
+
+  // This is both, double size (if rot/scale on)
+  // and obj disable (if not).
+  // Couldn't figure out how to make the union not
+  // increase the size by 2 bytes
+  bool horizontal_flip : 1;
+  bool vertical_flip : 1;
+
+  uint8_t obj_size : 2;
+};
+
+static_assert(sizeof(ObjAttr1) == 2);
+
+struct __attribute__((packed)) ObjAttr2
+{
+  uint16_t number : 10;
+  uint8_t priority : 2;
+  uint8_t palette_num : 4;
+};
+
+static_assert(sizeof(ObjAttr2) == 2);
+
+struct OAMEntry
+{
+  ObjAttr0 attr0;
+  ObjAttr1 attr1;
+  ObjAttr2 attr2;
+  uint16_t scale;
+};
+
+struct OAMEntries
+{
+  OAMEntry entries[128];
+};
+
+static_assert(sizeof(OAMEntry) == 0x8, "Size of OAM entry doesn't match");
+
 static Palette *pPaletteRam = NULL;
+static OAMEntries *pOAMEntries = NULL;
 static SDL_PixelFormat *s_pPixelFormat = NULL;
 
 typedef Uint16 FBPixel;
@@ -157,6 +240,18 @@ int main(int argc, char *argv[])
 
   lseek(fd, nPaletteOffset, SEEK_SET);
   read(fd, pPaletteRam, nPaletteSize);
+
+  const size_t nOAMSize = sizeof(OAMEntries);
+
+  pOAMEntries = (OAMEntries*)mmap((void*)0x07000000, nOAMSize, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_SHARED, -1, 0);
+  if (pOAMEntries == MAP_FAILED)
+  {
+    fprintf(stderr, "Failed mapping of OAM RAM\n");
+    return -1;
+  }
+
+  lseek(fd, 0xc00, SEEK_SET);
+  read(fd, pOAMEntries, nOAMSize);
 
 #ifdef USE_SDL
   int retval = SDL_Init(SDL_INIT_VIDEO);
