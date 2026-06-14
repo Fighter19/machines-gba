@@ -199,11 +199,79 @@ static void renderRowOfTileWithPalette(void *pVram, Palette *pSourcePalette, Til
     FBPixel pixel1RGBA = palIndexToRGBA(bIsObj, pTileInfo->palNumber, pixel1);
     FBPixel pixel2RGBA = palIndexToRGBA(bIsObj, pTileInfo->palNumber, pixel2);
 
-    pDst[0] = pixel1RGBA;
-    pDst[1] = pixel2RGBA;
+    if (pixel1)
+      pDst[0] = pixel1RGBA;
+    if (pixel2)
+      pDst[1] = pixel2RGBA;
     // Progress by two pixels
     pDst += 2;
   }
+}
+
+struct ObjDimensions
+{
+  uint8_t nWidth;
+  uint8_t nHeight;
+};
+
+struct ObjSizeLUTEntry
+{
+  ObjDimensions square;
+  ObjDimensions horizontal;
+  ObjDimensions vertical;
+};
+
+static const ObjSizeLUTEntry k_ObjSizeLUT[4] =
+{
+  // 0 - 8
+  {
+    .square = {.nWidth = 8, .nHeight = 8},
+    .horizontal = {.nWidth = 16, .nHeight = 8},
+    .vertical = {.nWidth = 8, .nHeight = 16}
+  },
+  // 1 - 16
+  {
+    .square = {.nWidth = 16, .nHeight = 16},
+    .horizontal = {.nWidth = 32, .nHeight = 8},
+    .vertical = {.nWidth = 8, .nHeight = 32}
+  },
+  // 2 - 32
+  {
+    .square = {.nWidth = 32, .nHeight = 32},
+    .horizontal = {.nWidth = 32, .nHeight = 16},
+    .vertical = {.nWidth = 16, .nHeight = 32}
+  },
+  // 3 - 64
+  {
+    .square = {.nWidth = 64, .nHeight = 64},
+    .horizontal = {.nWidth = 64, .nHeight = 32},
+    .vertical = {.nWidth = 32, .nHeight = 64}
+  }
+};
+
+static void DebugBreak()
+{
+  abort();
+}
+
+static ObjDimensions GetTileDimensions(ObjShape shape, uint8_t nObjSize)
+{
+  if (shape == OBJ_SHAPE_SQUARE)
+  {
+    return k_ObjSizeLUT[nObjSize].square;
+  }
+  else if (shape == OBJ_SHAPE_HORIZONTAL)
+  {
+    return k_ObjSizeLUT[nObjSize].horizontal;
+  }
+  else if (shape == OBJ_SHAPE_VERTICAL)
+  {
+    return k_ObjSizeLUT[nObjSize].vertical;
+  }
+
+  // Assertion hit: shape is unknown/impossible
+  DebugBreak();
+  return k_ObjSizeLUT[nObjSize].square;
 }
 
 // 256 is 240 aligned to 32,
@@ -261,7 +329,7 @@ int main(int argc, char *argv[])
     return -1;
   }
 
-  SDL_Window *pMainWindow = SDL_CreateWindow("Physics test", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, 240, 140, 0);
+  SDL_Window *pMainWindow = SDL_CreateWindow("Physics test", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, 240, 160, 0);
   if (!pMainWindow)
   {
     fprintf(stderr, "Error occured while opening Window: %s\n", SDL_GetError());
@@ -342,11 +410,55 @@ int main(int argc, char *argv[])
         linebuffer[x] = brightness * 0x421;
       }
 
-      // Mock render of one tile repeatedly across the very left
-      TileInfo tileInfo;
-      tileInfo.idx = 0;
-      tileInfo.palNumber = 15;
-      renderRowOfTileWithPalette(pVram, pPaletteRam, &tileInfo, true, y % 8, &linebuffer[0]);
+      // Pre-sort the tiles by y, to only consider the ones that will be on this line
+      OAMEntry *entries[128];
+      ObjDimensions dimensions[128];
+      size_t nEntryCount = 0;
+      for (int8_t nEntry = 127; nEntry >= 0; nEntry--)
+      {
+        dimensions[nEntryCount] = GetTileDimensions(pOAMEntries->entries[nEntry].attr0.obj_shape, pOAMEntries->entries[nEntry].attr1.obj_size);
+        // TODO: Get tile height based on attributes and mode
+        bool bWillDraw = true;
+        if (pOAMEntries->entries[nEntry].attr0.rot_scale_on == false && pOAMEntries->entries[nEntry].attr0.double_size_on_obj_disable)
+        {
+          bWillDraw = false;
+        }
+
+        if (bWillDraw && y >= pOAMEntries->entries[nEntry].attr0.y && y < pOAMEntries->entries[nEntry].attr0.y + dimensions[nEntryCount].nHeight)
+        {
+          entries[nEntryCount] = &pOAMEntries->entries[nEntry];
+          nEntryCount++;
+        }
+      }
+
+      // countof OAMEntries
+      for (int nEntry = 0; nEntry < nEntryCount; nEntry++)
+      {
+        size_t x_tiles = dimensions[nEntry].nWidth / 8;
+        size_t y_tiles = dimensions[nEntry].nHeight / 8;
+
+        // Y position within the tile
+        int y_rel_tile = y - entries[nEntry]->attr0.y;
+
+        size_t cur_y_tile = 0;
+        if (y_rel_tile > 0)
+        {
+          cur_y_tile = y_rel_tile / 8;
+        }
+        y_rel_tile = y_rel_tile % 8;
+
+        // Offset in number of tiles from the first,
+        // caused due to y increase
+        size_t tile_offset = cur_y_tile * x_tiles;
+
+        for (uint8_t x_tile = 0; x_tile < x_tiles; x_tile++)
+        {
+          TileInfo tileInfo;
+          tileInfo.idx = entries[nEntry]->attr2.number + tile_offset + x_tile;
+          tileInfo.palNumber = entries[nEntry]->attr2.palette_num;
+          renderRowOfTileWithPalette(pVram, pPaletteRam, &tileInfo, true, y_rel_tile, &linebuffer[entries[nEntry]->attr1.x + x_tile * 8]);
+        }
+      }
 
       // End of linebuffer
 
