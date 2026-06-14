@@ -37,7 +37,7 @@
       "args": [],
       "stopAtEntry": false,
       "cwd": "${workspaceFolder}/build",
-      "environment": [],
+      "environment": [ {"name": "ASAN_OPTIONS", "value": "abort_on_error=1" }],
       "externalConsole": false,
       "MIMode": "gdb",
       "setupCommands": [
