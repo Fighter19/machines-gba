@@ -1,14 +1,27 @@
 #include <stdio.h>
+#include <fcntl.h>
+#ifndef _WIN32
 #include <unistd.h>
 #include <sys/mman.h>
-#include <fcntl.h>
+#else
+#include <Windows.h>
+#endif
 
 // Use for debugging the state of the physics world, visually.
 // Set in CMake variables
 #ifdef USE_SDL
-#include <SDL2/SDL.h>
+//#include <SDL2/SDL.h>
+#include "SDL3/SDL.h"
+
+#if SDL_MAJOR_VERSION == 2
 #define SDL_SUCCESS(x) (x == 0)
+#else
+#define SDL_SUCCESS(x) (x)
 #endif
+
+#endif
+
+#include <fstream>
 
 static void print_msg(char *msg)
 {
@@ -38,7 +51,7 @@ struct Palette
   PaletteRow rows_obj[16];
 };
 
-typedef enum
+typedef enum : uint8_t
 {
   OBJ_MODE_NORMAL,
   OBJ_MODE_TRANSPARENT,
@@ -46,13 +59,13 @@ typedef enum
   OBJ_MODE_PROHIBTED
 } ObjMode;
 
-typedef enum
+typedef enum : uint8_t
 {
   COLOR_AND_PAL_16_16,
   COLOR_AND_PAL_256_1
 } ColorsAndPalConfig;
 
-typedef enum
+typedef enum : uint8_t
 {
   OBJ_SHAPE_SQUARE,
   OBJ_SHAPE_HORIZONTAL,
@@ -99,8 +112,8 @@ static_assert(sizeof(ObjAttr1) == 2);
 struct __attribute__((packed)) ObjAttr2
 {
   uint16_t number : 10;
-  uint8_t priority : 2;
-  uint8_t palette_num : 4;
+  uint16_t priority : 2;
+  uint16_t palette_num : 4;
 };
 
 static_assert(sizeof(ObjAttr2) == 2);
@@ -122,7 +135,11 @@ static_assert(sizeof(OAMEntry) == 0x8, "Size of OAM entry doesn't match");
 
 static Palette *pPaletteRam = NULL;
 static OAMEntries *pOAMEntries = NULL;
+#if SDL_MAJOR_VERSION == 2
 static SDL_PixelFormat *s_pPixelFormat = NULL;
+#else
+static const SDL_PixelFormatDetails *s_pPixelFormat = NULL;
+#endif
 
 typedef Uint16 FBPixel;
 
@@ -281,6 +298,56 @@ static FBPixel linebuffer[256];
 
 int main(int argc, char *argv[])
 {
+#ifdef _WIN32
+  std::ifstream file_vram("vram.bin", std::ios::binary);
+  if (!file_vram.is_open())
+  {
+    fprintf(stderr, "Failed to open vram.bin");
+    return -1;
+  }
+
+  void *pVram = VirtualAlloc((void *)0x06000000, 0x18000, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+  if (pVram == NULL)
+  {
+    fprintf(stderr, "VritualAlloc failed:\n");
+    fprintf(stderr, "%lu", GetLastError());
+    return -1;
+  }
+
+  file_vram.seekg(0x1000, std::ios_base::beg);
+  file_vram.read((char*)pVram, 0x18000);
+
+  // PALETTE
+
+  const size_t nPaletteSize = 0x400;
+  const size_t nPaletteOffset = 0x800;
+
+  pPaletteRam = (Palette*)VirtualAlloc((void *)0x05000000, nPaletteSize, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+  if (pPaletteRam == NULL)
+  {
+    fprintf(stderr, "VritualAlloc failed:\n");
+    fprintf(stderr, "%lu", GetLastError());
+    return -1;
+  }
+
+  file_vram.seekg(nPaletteOffset, file_vram.beg);
+  file_vram.read((char*)pPaletteRam, nPaletteSize);
+
+  // OAM
+
+  const size_t nOAMSize = sizeof(OAMEntries);
+
+  pOAMEntries = (OAMEntries*)VirtualAlloc((void *)0x07000000, nPaletteSize, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+  if (pOAMEntries == NULL)
+  {
+    fprintf(stderr, "VritualAlloc failed:\n");
+    fprintf(stderr, "%lu", GetLastError());
+    return -1;
+  }
+
+  file_vram.seekg(0xc00, std::ios_base::beg);
+  file_vram.read((char*)pOAMEntries, nOAMSize);
+#else
   int fd = open("vram.bin", O_RDONLY);
   if (fd == -1)
   {
@@ -320,6 +387,7 @@ int main(int argc, char *argv[])
 
   lseek(fd, 0xc00, SEEK_SET);
   read(fd, pOAMEntries, nOAMSize);
+#endif
 
 #ifdef USE_SDL
   int retval = SDL_Init(SDL_INIT_VIDEO);
@@ -329,7 +397,11 @@ int main(int argc, char *argv[])
     return -1;
   }
 
+#if SDL_MAJOR_VERSION == 2
   SDL_Window *pMainWindow = SDL_CreateWindow("Physics test", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, 240, 160, 0);
+#else
+  SDL_Window *pMainWindow = SDL_CreateWindow("Physics test", 240, 160, 0);
+#endif
   if (!pMainWindow)
   {
     fprintf(stderr, "Error occured while opening Window: %s\n", SDL_GetError());
@@ -339,7 +411,11 @@ int main(int argc, char *argv[])
   // Not relevant
   // Uint32 pixelFormat = SDL_GetWindowPixelFormat(pMainWindow);
 
+#if SDL_MAJOR_VERSION == 2
   SDL_Renderer *pRenderer = SDL_CreateRenderer(pMainWindow, -1, 0);
+#else
+  SDL_Renderer *pRenderer = SDL_CreateRenderer(pMainWindow, NULL);
+#endif
   if (!pRenderer)
   {
     fprintf(stderr, "Error occured while setting up renderer: %s\n", SDL_GetError());
@@ -347,8 +423,14 @@ int main(int argc, char *argv[])
   }
 
   // 16 = bit count. 256 = amount of pixels. Required is by count -> 2byte/pixel * 256 pixels
+#if SDL_MAJOR_VERSION == 2
   Uint32 pixelFormatGBA = SDL_MasksToPixelFormatEnum(16, 0x1F, 0x1F << 5, 0x1F << 10, 0x0);
   s_pPixelFormat = SDL_AllocFormat(pixelFormatGBA);
+#else
+  SDL_PixelFormat pixelFormatGBA = SDL_GetPixelFormatForMasks(16, 0x1F, 0x1F << 5, 0x1F << 10, 0x0);
+  s_pPixelFormat = SDL_GetPixelFormatDetails(pixelFormatGBA);
+#endif
+
   if (!s_pPixelFormat)
   {
     fprintf(stderr, "Failed to obtain pixel format\n");
@@ -373,7 +455,11 @@ int main(int argc, char *argv[])
     SDL_Event event;
     while (SDL_PollEvent(&event))
     {
+#if SDL_MAJOR_VERSION == 2
       if (event.type == SDL_KEYDOWN)
+#else
+      if (event.type == SDL_EVENT_KEY_DOWN)
+#endif
       {
         bQuit = true;
       }
@@ -476,12 +562,17 @@ int main(int argc, char *argv[])
     SDL_UnlockTexture(pTexture);
 
     // Render the uploaded texture
+#if SDL_MAJOR_VERSION == 2
     SDL_RenderCopy(pRenderer, pTexture, NULL, NULL);
+#else
+    SDL_RenderTexture(pRenderer, pTexture, NULL, NULL);
+#endif
 
 #ifdef USE_SDL
     SDL_RenderPresent(pRenderer);
     // Prevent rendering and logic to cap it to 60 FPS
-    usleep(16666);
+    // usleep(16666);
+    SDL_DelayNS(16666666);
 #endif
   }
 
