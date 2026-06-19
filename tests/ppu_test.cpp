@@ -10,15 +10,7 @@
 // Use for debugging the state of the physics world, visually.
 // Set in CMake variables
 #ifdef USE_SDL
-//#include <SDL2/SDL.h>
 #include "SDL3/SDL.h"
-
-#if SDL_MAJOR_VERSION == 2
-#define SDL_SUCCESS(x) (x == 0)
-#else
-#define SDL_SUCCESS(x) (x)
-#endif
-
 #endif
 
 #include <fstream>
@@ -135,11 +127,7 @@ static_assert(sizeof(OAMEntry) == 0x8, "Size of OAM entry doesn't match");
 
 static Palette *pPaletteRam = NULL;
 static OAMEntries *pOAMEntries = NULL;
-#if SDL_MAJOR_VERSION == 2
-static SDL_PixelFormat *s_pPixelFormat = NULL;
-#else
 static const SDL_PixelFormatDetails *s_pPixelFormat = NULL;
-#endif
 
 typedef Uint16 FBPixel;
 
@@ -390,18 +378,14 @@ int main(int argc, char *argv[])
 #endif
 
 #ifdef USE_SDL
-  int retval = SDL_Init(SDL_INIT_VIDEO);
-  if (!SDL_SUCCESS(retval))
+  bool bSuccess = SDL_Init(SDL_INIT_VIDEO);
+  if (!bSuccess)
   {
     fprintf(stderr, "Error occured while initializing SDL: %s\n", SDL_GetError());
     return -1;
   }
 
-#if SDL_MAJOR_VERSION == 2
-  SDL_Window *pMainWindow = SDL_CreateWindow("Physics test", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, 240, 160, 0);
-#else
   SDL_Window *pMainWindow = SDL_CreateWindow("Physics test", 240, 160, 0);
-#endif
   if (!pMainWindow)
   {
     fprintf(stderr, "Error occured while opening Window: %s\n", SDL_GetError());
@@ -411,11 +395,7 @@ int main(int argc, char *argv[])
   // Not relevant
   // Uint32 pixelFormat = SDL_GetWindowPixelFormat(pMainWindow);
 
-#if SDL_MAJOR_VERSION == 2
-  SDL_Renderer *pRenderer = SDL_CreateRenderer(pMainWindow, -1, 0);
-#else
   SDL_Renderer *pRenderer = SDL_CreateRenderer(pMainWindow, NULL);
-#endif
   if (!pRenderer)
   {
     fprintf(stderr, "Error occured while setting up renderer: %s\n", SDL_GetError());
@@ -423,13 +403,8 @@ int main(int argc, char *argv[])
   }
 
   // 16 = bit count. 256 = amount of pixels. Required is by count -> 2byte/pixel * 256 pixels
-#if SDL_MAJOR_VERSION == 2
-  Uint32 pixelFormatGBA = SDL_MasksToPixelFormatEnum(16, 0x1F, 0x1F << 5, 0x1F << 10, 0x0);
-  s_pPixelFormat = SDL_AllocFormat(pixelFormatGBA);
-#else
   SDL_PixelFormat pixelFormatGBA = SDL_GetPixelFormatForMasks(16, 0x1F, 0x1F << 5, 0x1F << 10, 0x0);
   s_pPixelFormat = SDL_GetPixelFormatDetails(pixelFormatGBA);
-#endif
 
   if (!s_pPixelFormat)
   {
@@ -455,11 +430,7 @@ int main(int argc, char *argv[])
     SDL_Event event;
     while (SDL_PollEvent(&event))
     {
-#if SDL_MAJOR_VERSION == 2
-      if (event.type == SDL_KEYDOWN)
-#else
       if (event.type == SDL_EVENT_KEY_DOWN)
-#endif
       {
         bQuit = true;
       }
@@ -562,11 +533,7 @@ int main(int argc, char *argv[])
     SDL_UnlockTexture(pTexture);
 
     // Render the uploaded texture
-#if SDL_MAJOR_VERSION == 2
-    SDL_RenderCopy(pRenderer, pTexture, NULL, NULL);
-#else
     SDL_RenderTexture(pRenderer, pTexture, NULL, NULL);
-#endif
 
 #ifdef USE_SDL
     SDL_RenderPresent(pRenderer);
