@@ -22,6 +22,8 @@
 #include "../source/r6502_portfont_bin.h"
 #include "../source/Common/ppu.h"
 
+#include <array>
+
 static volatile OAMEntries *pOAMEntries = (OAMEntries*)0x07000000;
 #else
 static OAMEntries *pOAMEntries = NULL;
@@ -72,6 +74,56 @@ const u16 palette[] = {
 	RGB8(0xCA,0xFF,0xE2),
 	RGB8(0xB7,0xFD,0xD8),
 	RGB8(0x2C,0x4F,0x8B)
+};
+
+enum eTimerToUse
+{
+	TIMER0,
+	TIMER1,
+	TIMER2,
+	TIMER3
+};
+
+static std::array<uint64_t, 4> gFunctionCycles = {0, 0, 0, 0};
+
+template <size_t Timer>
+class FunctionProfiler
+{
+public:
+	FunctionProfiler()
+	{
+	}
+
+	void Start()
+	{
+    gFunctionCycles[Timer] = 0;
+
+		// Set TM0CNT_L to 0
+		*(vu16 *)(REG_BASE + 0x100 + Timer * 4) = 0;
+
+		// Activate timer by setting TM0CNT_H to 0x80
+		*(vu16 *)(REG_BASE + 0x102 + Timer * 4) = 0x83;
+	}
+
+	void Stop()
+	{
+		// Read the cycle count
+		vu16 endCycle = *(vu16 *)(REG_BASE + 0x100 + Timer * 4);
+
+		// Deactivate timer by setting TM0CNT_H to 0
+		*(vu16 *)(REG_BASE + 0x102 + Timer * 4) = 0;
+
+		// // Check for overflow
+		// if (endCycle < startCycle)
+		// {
+		// 	endCycle += 0x100000000;
+		// }
+
+		gFunctionCycles[Timer] += (uint64_t)(endCycle - startCycle) * 1024;
+	}
+
+private:
+	vu16 startCycle = 0;
 };
 
 static char *g_pCurrentFB = (char*)VRAM;
@@ -219,6 +271,9 @@ int main(int argc, char *argv[])
 
   SGWorld2DInternal::BodyCollisionInfo body_collision_info;
   bool bQuit = false;
+#ifdef GBA
+  // FunctionProfiler<0> function0;
+#endif
   while(!bQuit)
   {
 #ifdef USE_SDL
@@ -229,6 +284,7 @@ int main(int argc, char *argv[])
 #ifdef GBA
     // Wait until VBlank is entered to make sure we can safely draw
     VBlankIntrWait();
+    // 280576 is 16.6ms / 60FPS (100% of available back-buffer counter)
 
     if (g_pCurrentFB == (char*)VRAM)
     {
@@ -248,6 +304,7 @@ int main(int argc, char *argv[])
     CpuFastSet(g_pCurrentFB, g_pCurrentFB, FILL | COPY32 | (0xa000 / 4));
 #endif
 
+    // 17.5% on this function
     bool bCollided = world.move_and_collide(&ball_body, SGFixedVector2Internal(fixed::from_int(0), fixed::from_int(1)), &body_collision_info);
     if (bCollided)
     {
@@ -275,11 +332,15 @@ int main(int argc, char *argv[])
 #endif
 
 #ifdef GBA
-    SGFixedRect2Internal bounds = floor_body.get_bounds();
-    RenderFillRect(bounds, 0x1);
+    asm volatile("nop");
 
-    bounds = ball_body.get_bounds();
-    RenderFillRect(bounds, 0x2);
+    // 6% on this
+    SGFixedRect2Internal bounds1 = floor_body.get_bounds();
+    SGFixedRect2Internal bounds2 = ball_body.get_bounds();
+
+    // Critically slow: 16% of free time on rendering this
+    RenderFillRect(bounds1, 0x1);
+    RenderFillRect(bounds2, 0x2);
 #endif
   }
 
