@@ -4,6 +4,7 @@
 
 #include <stdio.h>
 #include <unistd.h>
+#include <string.h>
 
 // Use for debugging the state of the physics world, visually.
 // Set in CMake variables
@@ -12,9 +13,25 @@
 #define SDL_SUCCESS(x) (x == 0)
 #endif
 
+#ifdef GBA
+#include <gba_base.h>
+#include <gba_video.h>
+#include <gba_systemcalls.h>
+#include <gba_interrupt.h>
+
+#include "../source/r6502_portfont_bin.h"
+#include "../source/Common/ppu.h"
+
+static volatile OAMEntries *pOAMEntries = (OAMEntries*)0x07000000;
+#else
+static OAMEntries *pOAMEntries = NULL;
+#endif
+
 static void print_msg(char *msg)
 {
+#ifndef GBA
   puts(msg);
+#endif
 }
 
 static void print_fixed(fixed value)
@@ -26,11 +43,13 @@ static void print_fixed(fixed value)
 
 static void print_vec2d(SGFixedVector2Internal vec2d)
 {
+#ifndef GBA
   printf("Vec2D: {x: ");
   print_fixed(vec2d.x);
   printf(" y: ");
   print_fixed(vec2d.y);
   printf("}");
+#endif
 }
 
 #ifdef USE_SDL
@@ -44,6 +63,75 @@ static SDL_Rect SgToSdlRect(SGFixedRect2Internal sgRect)
   return rect;
 }
 #endif
+
+const u16 palette[] = {
+	RGB8(0x40,0x80,0xc0),
+	RGB8(0xFF,0xFF,0xFF),
+	RGB8(0xF5,0xFF,0xFF),
+	RGB8(0xDF,0xFF,0xF2),
+	RGB8(0xCA,0xFF,0xE2),
+	RGB8(0xB7,0xFD,0xD8),
+	RGB8(0x2C,0x4F,0x8B)
+};
+
+static char *g_pCurrentFB = (char*)VRAM;
+
+static void RenderFillRect(SGFixedRect2Internal &rect, uint8_t color)
+{
+  int pos_x = rect.position.x.to_int();
+  if (pos_x < 0)
+  {
+    pos_x = 0;
+  }
+
+  int dest_x = pos_x + rect.size.width.to_int();
+  if (dest_x >= 240)
+  {
+    dest_x = 240;
+  }
+
+  if (pos_x >= 240)
+  {
+    pos_x = 239;
+  }
+
+  uint8_t line[240] = {0};
+  for(uint8_t x = pos_x; x < dest_x; x+=1)
+  {
+    line[x] = color;
+  }
+
+  int pos_y = rect.position.y.to_int();
+  if (pos_y < 0)
+  {
+    pos_y = 0;
+  }
+
+  int dest_y = pos_y + rect.size.height.to_int();
+  if (dest_y >= 160)
+  {
+    dest_y = 160;
+  }
+
+  if (pos_y >= 160)
+  {
+    pos_y = 159;
+  }
+
+  uint16_t offset_total = 0;
+  // No out-of-bounds check on y, should be enough space after
+  offset_total = pos_y * 240 + pos_x;
+
+  char *vramBytes = (char*)g_pCurrentFB;
+  vramBytes += offset_total;
+
+  for (int y = pos_y; y < dest_y; y++)
+  {
+    memcpy(vramBytes, line, 240);
+    // Offset per line
+    vramBytes += 240;
+  }
+}
 
 int main(int argc, char *argv[])
 {
@@ -67,6 +155,50 @@ int main(int argc, char *argv[])
   {
     fprintf(stderr, "Error occured while setting up renderer: %s\n", SDL_GetError());
     return -1;
+  }
+#endif
+
+#ifdef GBA
+  // Set up the interrupt handlers
+	irqInit();
+	// Enable Vblank Interrupt to allow VblankIntrWait
+	irqEnable(IRQ_VBLANK);
+
+	// Allow Interrupts
+	REG_IME = 1;
+
+  vu16 * temppointer = BG_COLORS;
+	for(int i=0; i<7; i++) {
+		*temppointer++ = palette[i];
+	}
+
+  BG_COLORS[0] = RGB8(0xFF,0xDF,0xFF);
+  BG_COLORS[1] = RGB8(0xFF,0x00,0x00);
+  BG_COLORS[2] = RGB8(0X00,0xFF,0x00);
+
+  // TODO: Toggle between 0x0000 and 0xa000 for framebuffer
+
+  CpuFastSet(r6502_portfont_bin, (u16*)VRAM,(r6502_portfont_bin_size/4) | COPY32);
+
+  // pOAMEntries->entries[0].attr0.double_size_on_obj_disable = 0;
+  // pOAMEntries->entries[0].attr0.obj_mode = OBJ_MODE_NORMAL;
+  // pOAMEntries->entries[0].attr0.obj_shape = OBJ_SHAPE_SQUARE;
+  // pOAMEntries->entries[0].attr0.y = 5;
+
+  // pOAMEntries->entries[0].attr1.obj_size = 0;
+  // pOAMEntries->entries[0].attr1.x = 5;
+
+  // pOAMEntries->entries[0].attr2.number = 32;
+  // pOAMEntries->entries[0].attr2.palette_num = 0;
+  // pOAMEntries->entries[0].attr2.priority = 3;
+  SetMode(MODE_4 | BG2_ON);
+
+  memset((void*)VRAM, 0, 0xa000);
+
+  volatile uint8_t *vram2px = (uint8_t*)VRAM;
+  for(uint8_t x = 0; x < 240; x+=1)
+  {
+    vram2px[x] = 0x1;
   }
 #endif
 
@@ -94,16 +226,40 @@ int main(int argc, char *argv[])
     SDL_RenderClear(pRenderer);
 #endif
 
+#ifdef GBA
+    // Wait until VBlank is entered to make sure we can safely draw
+    VBlankIntrWait();
+
+    if (g_pCurrentFB == (char*)VRAM)
+    {
+      // VRAM contains stable image, draw to the second buffer
+      SetMode(MODE_4 | BG2_ON);
+      g_pCurrentFB = (char*)VRAM+0xa000;
+    }
+    else
+    {
+      // VRAM+0xa000 contains stable image, draw to first buffer
+      g_pCurrentFB = (char*)VRAM;
+      SetMode(MODE_4 | BG2_ON | LCDC_BITS::BACKBUFFER);
+    }
+
+    // Current buffer is the one that will be drawn to
+    *(uint32_t*)g_pCurrentFB = 0;
+    CpuFastSet(g_pCurrentFB, g_pCurrentFB, FILL | COPY32 | (0xa000 / 4));
+#endif
+
     bool bCollided = world.move_and_collide(&ball_body, SGFixedVector2Internal(fixed::from_int(0), fixed::from_int(1)), &body_collision_info);
     if (bCollided)
     {
       bQuit = bCollided;
     }
+#ifndef GBA
     printf("Ball: ");
     print_vec2d(ball_body.get_transform().get_origin());
     printf("\nFloor: ");
     print_vec2d(floor_body.get_transform().get_origin());
     printf("\n");
+#endif
 
 #ifdef USE_SDL
     SDL_Rect sdlFloorRect = SgToSdlRect(floor_body.get_bounds());
@@ -116,6 +272,14 @@ int main(int argc, char *argv[])
     SDL_RenderPresent(pRenderer);
     // Prevent rendering and logic to cap it to 60 FPS
     usleep(16666);
+#endif
+
+#ifdef GBA
+    SGFixedRect2Internal bounds = floor_body.get_bounds();
+    RenderFillRect(bounds, 0x1);
+
+    bounds = ball_body.get_bounds();
+    RenderFillRect(bounds, 0x2);
 #endif
   }
 
