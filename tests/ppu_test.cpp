@@ -286,6 +286,25 @@ static ObjDimensions GetTileDimensions(ObjShape shape, uint8_t nObjSize)
 // without having to use range checks
 static FBPixel linebuffer[256];
 
+typedef enum
+{
+  GAME_ACTION_MOVE_LEFT,
+  GAME_ACTION_MOVE_RIGHT,
+  GAME_ACTION_MAX
+} GameActionEnum;
+
+static bool s_bGameActionActive[GAME_ACTION_MAX] = {false};
+
+static void SetGameActionActive(GameActionEnum action, bool bActive)
+{
+  s_bGameActionActive[action] = bActive;
+}
+
+static bool IsGameActionActive(GameActionEnum action)
+{
+  return s_bGameActionActive[action];
+}
+
 int main(int argc, char *argv[])
 {
 #ifdef _WIN32
@@ -434,10 +453,36 @@ int main(int argc, char *argv[])
     {
       if (event.type == SDL_EVENT_KEY_DOWN)
       {
-        bQuit = true;
+        if (event.key.key == SDLK_RIGHT)
+        {
+          SetGameActionActive(GAME_ACTION_MOVE_RIGHT, true);
+        }
+        else if (event.key.key == SDLK_LEFT)
+        {
+          SetGameActionActive(GAME_ACTION_MOVE_LEFT, true);
+        }
+        else if (event.key.key == SDLK_Q)
+        {
+          bQuit = true;
+        }
+      }
+      else if (event.type == SDL_EVENT_KEY_UP)
+      {
+        if (event.key.key == SDLK_RIGHT)
+        {
+          SetGameActionActive(GAME_ACTION_MOVE_RIGHT, false);
+        }
+        else if (event.key.key == SDLK_LEFT)
+        {
+          SetGameActionActive(GAME_ACTION_MOVE_LEFT, false);
+        }
       }
     }
 #endif
+    if (IsGameActionActive(GAME_ACTION_MOVE_RIGHT))
+      pOAMEntries->entries[4].attr1.x += 2;
+    else if (IsGameActionActive(GAME_ACTION_MOVE_LEFT))
+      pOAMEntries->entries[4].attr1.x -= 2;
 
     // Currently lock everything
     SDL_Rect rect;
