@@ -254,10 +254,12 @@ static const ObjSizeLUTEntry k_ObjSizeLUT[4] =
   }
 };
 
+#ifndef WIN32
 static void DebugBreak()
 {
   abort();
 }
+#endif
 
 static ObjDimensions GetTileDimensions(ObjShape shape, uint8_t nObjSize)
 {
