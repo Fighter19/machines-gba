@@ -189,6 +189,39 @@ static void RenderFillRect(SGFixedRect2Internal &rect, uint8_t color)
   }
 }
 
+#pragma GCC push_options
+#pragma GCC optimize ("O0")
+static bool TestTransform()
+{
+  // sqrt(5 * 5) should be 5
+  fixed length = fixed(sg_sqrt_32(1280 * 1280));
+  if (length.value != 1280)
+  {
+    return false;
+  }
+
+
+  SGFixedTransform2DInternal t;
+  t.elements[0] = SGFixedVector2Internal(fixed::from_int(1), fixed::from_int(0));
+  t.elements[1] = SGFixedVector2Internal(fixed::from_int(0), fixed::from_int(1));
+  t.elements[2] = SGFixedVector2Internal(fixed::from_int(0), fixed::from_int(0));
+
+  std::vector<SGFixedVector2Internal> global_axes(2);
+  SGFixedVector2Internal extents(fixed::from_int(130), fixed::from_int(5));
+  global_axes[0] = t.xform(SGFixedVector2Internal(extents.x, fixed::ZERO)).normalized();
+  //global_axes[1] = t.xform(SGFixedVector2Internal(fixed::ZERO, extents.y)).normalized();
+
+  global_axes[1] = t.xform(SGFixedVector2Internal(fixed::ZERO, extents.y));
+  global_axes[1] = global_axes[1].normalized();
+  if (global_axes[0].x == fixed::from_int(1) && global_axes[0].y == fixed::from_int(0) &&
+      global_axes[1].y == fixed::from_int(1) && global_axes[1].x == fixed::from_int(0))
+  {
+    return true;
+  }
+  return false;
+}
+#pragma GCC pop_options
+
 int main(int argc, char *argv[])
 {
 #ifdef USE_SDL
@@ -269,6 +302,8 @@ int main(int argc, char *argv[])
   // pOAMEntries->entries[0].attr2.priority = 3;
   SetMode(MODE_4 | BG2_ON);
 #endif
+
+  // TestTransform();
 
   // 128 is the default cell-size of the physics server, when used with Godot
   SGWorld2DInternal world(128);
