@@ -21,6 +21,7 @@
 
 #include "../source/r6502_portfont_bin.h"
 #include "../source/Common/ppu.h"
+#include "../source/splash.h"
 
 #include <array>
 
@@ -179,7 +180,10 @@ static void RenderFillRect(SGFixedRect2Internal &rect, uint8_t color)
 
   for (int y = pos_y; y < dest_y; y++)
   {
-    memcpy(vramBytes, line, 240);
+    for (int x = pos_x; x < dest_x; x++)
+    {
+      vramBytes[x] = line[x];
+    }
     // Offset per line
     vramBytes += 240;
   }
@@ -224,13 +228,33 @@ int main(int argc, char *argv[])
 		*temppointer++ = palette[i];
 	}
 
+  const unsigned char *splash_bytes = bin2c_splash_cropped_bmp;
+  const uint32_t nPosPicture = *(uint32_t*)(splash_bytes + 0x0a);
+  const unsigned char *splash_actual_bytes = splash_bytes + nPosPicture;
+
   BG_COLORS[0] = RGB8(0xFF,0xDF,0xFF);
   BG_COLORS[1] = RGB8(0xFF,0x00,0x00);
   BG_COLORS[2] = RGB8(0X00,0xFF,0x00);
 
   // TODO: Toggle between 0x0000 and 0xa000 for framebuffer
 
-  CpuFastSet(r6502_portfont_bin, (u16*)VRAM,(r6502_portfont_bin_size/4) | COPY32);
+  // CpuFastSet(r6502_portfont_bin, (u16*)VRAM,(r6502_portfont_bin_size/4) | COPY32);
+  int count = 0;
+  for (int color_idx = 0; color_idx < 256; color_idx++)
+  {
+    uint8_t b = splash_bytes[count+0x36];
+    uint8_t g = splash_bytes[count+0x36+1];
+    uint8_t r = splash_bytes[count+0x36+2];
+
+    BG_COLORS[color_idx] = RGB8(r,g,b);
+
+    // Padding to 4
+    count += 4;
+  }
+
+  CpuFastSet(splash_actual_bytes, (u16*)VRAM,(240*160/4) | COPY32);
+  sleep(1);
+  CpuFastSet(splash_actual_bytes, (u16*)(VRAM+0xa000),(240*160/4) | COPY32);
 
   // pOAMEntries->entries[0].attr0.double_size_on_obj_disable = 0;
   // pOAMEntries->entries[0].attr0.obj_mode = OBJ_MODE_NORMAL;
@@ -244,14 +268,6 @@ int main(int argc, char *argv[])
   // pOAMEntries->entries[0].attr2.palette_num = 0;
   // pOAMEntries->entries[0].attr2.priority = 3;
   SetMode(MODE_4 | BG2_ON);
-
-  memset((void*)VRAM, 0, 0xa000);
-
-  volatile uint8_t *vram2px = (uint8_t*)VRAM;
-  for(uint8_t x = 0; x < 240; x+=1)
-  {
-    vram2px[x] = 0x1;
-  }
 #endif
 
   // 128 is the default cell-size of the physics server, when used with Godot
@@ -301,7 +317,7 @@ int main(int argc, char *argv[])
 
     // Current buffer is the one that will be drawn to
     *(uint32_t*)g_pCurrentFB = 0;
-    CpuFastSet(g_pCurrentFB, g_pCurrentFB, FILL | COPY32 | (0xa000 / 4));
+    // CpuFastSet(g_pCurrentFB, g_pCurrentFB, FILL | COPY32 | (0xa000 / 4));
 #endif
 
     // 17.5% on this function

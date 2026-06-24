@@ -36,7 +36,7 @@ list(TRANSFORM SG_SOURCES PREPEND ${SG_PHYSICS_DIR})
 
 add_library(sg_physics_2d STATIC ${SG_SOURCES})
 target_include_directories(sg_physics_2d PUBLIC ${SG_PHYSICS_DIR})
-add_executable(sg_physics_test tests/sg_physics_basic_test.cpp source/r6502_portfont.bin.o)
+add_executable(sg_physics_test tests/sg_physics_basic_test.cpp source/r6502_portfont.bin.o source/splash.c)
 target_link_libraries(sg_physics_test sg_physics_2d)
 
 if (USE_PPU)
