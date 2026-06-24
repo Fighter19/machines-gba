@@ -351,8 +351,9 @@ int main(int argc, char *argv[])
     }
 
     // Current buffer is the one that will be drawn to
-    *(uint32_t*)g_pCurrentFB = 0;
+    //*(uint32_t*)g_pCurrentFB = 0;
     // CpuFastSet(g_pCurrentFB, g_pCurrentFB, FILL | COPY32 | (0xa000 / 4));
+    CpuFastSet(splash_actual_bytes, g_pCurrentFB, (240*160/4) | COPY32);
 #endif
 
     // 17.5% on this function
